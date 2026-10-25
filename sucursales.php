@@ -34,23 +34,23 @@ $sucursales = [
     </head>
     <body>
 
-        <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
-            <div class="container">
-                <a class="navbar-brand" href="index.php">Bella Napoli</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Mostrar u ocultar el menú">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="collapse navbar-collapse" id="menu">
-                    <ul class="navbar-nav ms-auto">
-                        <li class="nav-item"><a class="nav-link" href="index.php">Inicio</a></li>
-                        <li class="nav-item"><a class="nav-link" href="menu.php">Menú</a></li>
-                        <li class="nav-item"><a class="nav-link" href="arma-pizza.php">Arma tu pizza</a></li>
-                        <li class="nav-item"><a class="nav-link" href="pedido.php">Pedido</a></li>
-                        <li class="nav-item"><a class="nav-link active" aria-current="page" href="sucursales.php">Sucursales</a></li>
-                    </ul>
-                </div>
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="index.php">Bella Napoli</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#menu">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="menu">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link active" href="index.php">Inicio</a></li>
+                    <li class="nav-item"><a class="nav-link" href="menu.php">Menú</a></li>
+                    <li class="nav-item"><a class="nav-link" href="arma-pizza.php">Arma tu pizza</a></li>
+                    <li class="nav-item"><a class="nav-link" href="pedido.php">Pedido</a></li>
+                    <li class="nav-item"><a class="nav-link" href="sucursales.php">Sucursales</a></li>
+                </ul>
             </div>
-        </nav>
+        </div>
+    </nav>
 
         <main class="container mt-4 mb-5">
             <h1 class="titulo">Sucursales y pedidos en sesión</h1>
