@@ -1,6 +1,5 @@
 <?php
     session_start();
-
     require_once "datos.php";
 
     const TASA_ISV       = 0.15;
@@ -27,6 +26,7 @@
     $categoriasPizza = ["Pizzas Clásicas", "Pizzas Gourmet de la Casa"];
     $productos = [];
     $idProducto = 1;
+
     foreach ($menu as $categoria => $items) {
         foreach ($items as $item) {
             $productos[$idProducto] = ["categoria" => $categoria, "nombre" => $item["nombre"], "precios" => $item["precios"], "es_pizza" => in_array($categoria, $categoriasPizza, true), "unico" => count($item["precios"]) === 1,];
@@ -35,12 +35,10 @@
     }
 
     $errores = [];
-    $orden = null;
-    $datosValidos = false;
+    $orden   = null;
     $old = ["nombre" => "", "rtn" => "", "telefono" => "", "correo" => "", "direccion" => "", "producto" => "", "tamano" => "", "cantidad" => "1", "masa" => "tradicional", "extras" => [], "entrega" => "", "pago" => "",];
 
     if ($_SERVER["REQUEST_METHOD"] === "POST") {
-
         $nombre = limpiar($_POST["nombre"] ?? "");
         $rtn = limpiar($_POST["rtn"] ?? "");
         $telefono = limpiar($_POST["telefono"] ?? "");
@@ -53,7 +51,7 @@
         $entrega = limpiar($_POST["entrega"] ?? "");
         $pago = limpiar($_POST["pago"] ?? "");
         $extrasSel = [];
-
+    
         if (isset($_POST["extras"]) && is_array($_POST["extras"])) {
             foreach ($_POST["extras"] as $x) {
                 $extrasSel[] = limpiar($x);
@@ -103,9 +101,91 @@
             $errores[] = "Debes seleccionar el método de pago.";
         }
 
-        $datosValidos = empty($errores);
+        if (empty($errores)) {
+            $prod = $productos[(int)$producto];
+            $cant = (int)$cantidad;
+
+            if ($prod["unico"]) {
+                $presentacion = array_key_first($prod["precios"]);
+                $precioBase   = reset($prod["precios"]);
+            } else {
+                $presentacion = $tamanos[$tamano];
+                $precioBase   = $prod["precios"][$presentacion];
+            }
+
+            $recargoMasa   = 0;
+            $recargoExtras = 0;
+            $extrasNombres = [];
+            $masaNombre    = "";
+            if ($prod["es_pizza"]) {
+                $recargoMasa = $masas[$masa]["recargo"];
+                $masaNombre  = $masas[$masa]["nombre"];
+                foreach (array_unique($extrasSel) as $clave) {
+                    if (isset($extras[$clave])) {
+                        $recargoExtras  += $extras[$clave]["precio"];
+                        $extrasNombres[] = $extras[$clave]["nombre"];
+                    }
+                }
+            }
+
+            $precioUnitario = $precioBase + $recargoMasa + $recargoExtras;
+            $subtotal = $precioUnitario * $cant;
+            $descuento = ($prod["es_pizza"] && $cant >= MIN_PARA_DESC) ? round($subtotal * DESC_VOLUMEN, 2) : 0;
+            $baseGravable = $subtotal - $descuento;
+            $isv = round($baseGravable * TASA_ISV, 2);
+            $delivery = ($entrega === "delivery") ? COSTO_DELIVERY : 0;
+            $total = round($baseGravable + $isv + $delivery, 2);
+
+            $_SESSION["ultimo_folio"] = ($_SESSION["ultimo_folio"] ?? FOLIO_INICIAL) + 1;
+            $folio = "ORD-NAP-" . $_SESSION["ultimo_folio"];
+            $detalle = $cant . " x " . $prod["nombre"] . " - " . $presentacion;
+            if ($prod["es_pizza"]) {
+                $detalle .= " (masa " . $masaNombre . ")";
+                if (!empty($extrasNombres)) {
+                    $detalle .= " + " . implode(", ", $extrasNombres);
+                }
+            }
+
+            $orden = [
+                "folio" => $folio, 
+                "fecha" => date("d/m/Y H:i"), 
+                "cliente" => $nombre, "rtn" => $rtn, 
+                "telefono" => $telefono, 
+                "correo" => $correo, 
+                "direccion" => $direccion, 
+                "producto" => e($prod["nombre"]),
+                "presentacion" => e($presentacion),
+                "es_pizza" => $prod["es_pizza"],
+                "masa" => e($masaNombre),
+                "extras" => array_map("e", $extrasNombres),
+                "cantidad" => $cant,
+                "precio_base" => $precioBase,
+                "recargo_masa" => $recargoMasa,
+                "recargo_extras" => $recargoExtras,
+                "precio_unit" => $precioUnitario,
+                "subtotal" => $subtotal,
+                "descuento" => $descuento,
+                "base_gravable" => $baseGravable,
+                "isv" => $isv,
+                "delivery" => $delivery,
+                "total" => $total,
+                "entrega" => e($entregas[$entrega]),
+                "pago" => e($pagos[$pago]),
+                "detalle" => e($detalle),
+                "estado" => "Pendiente",
+            ];
+
+            $_SESSION["pedidos"][] = $orden;
+            $_SESSION["ultima_orden"] = $orden;
+
+            header("Location: pedido.php?ok=1");
+            exit;
+        }
     }
 
+    if ($_SERVER["REQUEST_METHOD"] === "GET" && isset($_GET["ok"]) && isset($_SESSION["ultima_orden"])) {
+        $orden = $_SESSION["ultima_orden"];
+    }
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -124,7 +204,6 @@
         </style>
     </head>
     <body>
-
         <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
             <div class="container">
                 <a class="navbar-brand" href="index.php">Bella Napoli</a>
@@ -157,11 +236,122 @@
                 </div>
             <?php endif; ?>
 
-            <?php if ($datosValidos): ?>
-                <div class="alert alert-success" role="alert">Datos validados correctamente. (Falta el cálculo de totales y la factura.)</div>
-            <?php endif; ?>
+            <?php if ($orden): ?>
+
+            <div class="alert alert-success" role="alert">
+                ¡Pedido registrado con éxito! Tu folio es <strong><?php echo $orden["folio"]; ?></strong>.
+            </div>
+
+            <section class="factura mb-4">
+                <div class="d-flex justify-content-between flex-wrap">
+                    <div>
+                        <h2 class="h4 mb-0">Pizzería Bella Napoli</h2>
+                        <small class="text-muted">Factura digital - Comprobante fiscal</small>
+                    </div>
+                    <div class="text-end">
+                        <p class="mb-0"><strong>Folio:</strong> <?php echo $orden["folio"]; ?></p>
+                        <p class="mb-0"><strong>Fecha:</strong> <?php echo $orden["fecha"]; ?></p>
+                    </div>
+                </div>
+                <hr>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-1"><strong>Cliente:</strong> <?php echo $orden["cliente"]; ?></p>
+                        <p class="mb-1"><strong>RTN:</strong> <?php echo $orden["rtn"]; ?></p>
+                        <p class="mb-1"><strong>Teléfono:</strong> <?php echo $orden["telefono"]; ?></p>
+                        <p class="mb-1"><strong>Correo:</strong> <?php echo $orden["correo"]; ?></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="mb-1"><strong>Modalidad:</strong> <?php echo $orden["entrega"]; ?></p>
+                        <p class="mb-1"><strong>Dirección:</strong> <?php echo $orden["direccion"]; ?></p>
+                        <p class="mb-1"><strong>Método de pago:</strong> <?php echo $orden["pago"]; ?></p>
+                        <p class="mb-1"><strong>Estado:</strong>
+                            <span class="badge bg-warning text-dark"><?php echo $orden["estado"]; ?></span>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="table-responsive mt-4">
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col">Descripción</th>
+                                <th scope="col" class="text-center">Cant.</th>
+                                <th scope="col" class="text-end">Precio unit.</th>
+                                <th scope="col" class="text-end">Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <strong><?php echo $orden["producto"]; ?></strong> - <?php echo $orden["presentacion"]; ?>
+                                    <br>
+                                    <small class="text-muted">
+                                        Precio base: L. <?php echo number_format($orden["precio_base"], 2); ?>
+                                        <?php if ($orden["es_pizza"]): ?>
+                                            <br>Masa <?php echo $orden["masa"]; ?>
+                                            (+ L. <?php echo number_format($orden["recargo_masa"], 2); ?>)
+                                            <?php if (!empty($orden["extras"])): ?>
+                                                <br>Extras: <?php echo implode(", ", $orden["extras"]); ?>
+                                                (+ L. <?php echo number_format($orden["recargo_extras"], 2); ?>)
+                                            <?php endif; ?>
+                                        <?php endif; ?>
+                                    </small>
+                                </td>
+                                <td class="text-center"><?php echo $orden["cantidad"]; ?></td>
+                                <td class="text-end">L. <?php echo number_format($orden["precio_unit"], 2); ?></td>
+                                <td class="text-end">L. <?php echo number_format($orden["subtotal"], 2); ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="row justify-content-end">
+                    <div class="col-md-6 col-lg-5">
+                        <table class="table table-sm mb-0">
+                            <tr>
+                                <td>Subtotal</td>
+                                <td class="text-end">L. <?php echo number_format($orden["subtotal"], 2); ?></td>
+                            </tr>
+                            <tr>
+                                <td>Descuento por volumen (10%)</td>
+                                <td class="text-end text-success">- L. <?php echo number_format($orden["descuento"], 2); ?></td>
+                            </tr>
+                            <tr>
+                                <td>Subtotal neto gravable</td>
+                                <td class="text-end">L. <?php echo number_format($orden["base_gravable"], 2); ?></td>
+                            </tr>
+                            <tr>
+                                <td>ISV (15%)</td>
+                                <td class="text-end">L. <?php echo number_format($orden["isv"], 2); ?></td>
+                            </tr>
+                            <tr>
+                                <td>Costo de envío</td>
+                                <td class="text-end">L. <?php echo number_format($orden["delivery"], 2); ?></td>
+                            </tr>
+                            <tr class="table-danger fw-bold fs-5">
+                                <td>TOTAL A PAGAR</td>
+                                <td class="text-end">L. <?php echo number_format($orden["total"], 2); ?></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+
+                <p class="text-center small text-muted mt-4 mb-0">
+                    Gracias por preferir Bella Napoli. Conserva este comprobante.
+                </p>
+            </section>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <a href="pedido.php" class="btn btn-ordenar">Hacer otro pedido</a>
+                <a href="sucursales.php" class="btn btn-outline-secondary">Ver panel de órdenes</a>
+            </div>
+
+        <?php else: ?>
 
             <form method="POST" action="pedido.php" novalidate>
+
                 <h2 class="h4 mt-2">Datos del cliente</h2>
                 <div class="row">
                     <div class="col-md-6 mb-3">
@@ -193,19 +383,22 @@
                         <select class="form-select" id="producto" name="producto" required>
                             <option value="">-- Selecciona --</option>
                             <?php
-                                $categoriaActual = null;
-                                foreach ($productos as $id => $p):
-                                    if ($p["categoria"] !== $categoriaActual):
-                                        if ($categoriaActual !== null) { echo "</optgroup>"; }
-                                        $categoriaActual = $p["categoria"];
-                                        echo "<optgroup label=\"" . e($categoriaActual) . "\">";
-                                    endif;
+                            $categoriaActual = null;
+                            foreach ($productos as $id => $p):
+                                if ($p["categoria"] !== $categoriaActual):
+                                    if ($categoriaActual !== null) { echo "</optgroup>"; }
+                                    $categoriaActual = $p["categoria"];
+                                    echo "<optgroup label=\"" . e($categoriaActual) . "\">";
+                                endif;
                             ?>
-                                <option value="<?php echo $id; ?>" data-unico="<?php echo $p["unico"] ? "1" : "0"; ?>" data-pizza="<?php echo $p["es_pizza"] ? "1" : "0"; ?>" <?php echo ($old["producto"] === (string)$id) ? "selected" : ""; ?>>
-                                        <?php echo e($p["nombre"]); ?> (desde L. <?php echo number_format(min($p["precios"]), 2); ?>)
+                                <option value="<?php echo $id; ?>"
+                                        data-unico="<?php echo $p["unico"] ? "1" : "0"; ?>"
+                                        data-pizza="<?php echo $p["es_pizza"] ? "1" : "0"; ?>"
+                                        <?php echo ($old["producto"] === (string)$id) ? "selected" : ""; ?>>
+                                    <?php echo e($p["nombre"]); ?> (desde L. <?php echo number_format(min($p["precios"]), 2); ?>)
                                 </option>
                             <?php endforeach; ?>
-                                            </optgroup>
+                            </optgroup>
                         </select>
                     </div>
                     <div class="col-md-4 mb-3">
@@ -246,7 +439,9 @@
                             <?php foreach ($extras as $clave => $x): ?>
                                 <div class="col-md-3 col-6">
                                     <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" name="extras[]" id="ex_<?php echo $clave; ?>" value="<?php echo $clave; ?>" <?php echo in_array($clave, $old["extras"], true) ? "checked" : ""; ?>>
+                                        <input class="form-check-input" type="checkbox" name="extras[]"
+                                               id="ex_<?php echo $clave; ?>" value="<?php echo $clave; ?>"
+                                               <?php echo in_array($clave, $old["extras"], true) ? "checked" : ""; ?>>
                                         <label class="form-check-label" for="ex_<?php echo $clave; ?>">
                                             <?php echo e($x["nombre"]); ?>
                                             <small class="text-muted">(+ L. <?php echo number_format($x["precio"], 2); ?>)</small>
@@ -285,11 +480,15 @@
                     </div>
                 </div>
 
-                <div class="alert alert-info small">Los precios del menú no incluyen ISV: se agrega el 15% sobre el subtotal neto en la factura. Si pides 3 o más pizzas recibes 10% de descuento.
+                <div class="alert alert-info small">
+                    Los precios del menú no incluyen ISV: se agrega el 15% sobre el subtotal neto en la factura.
+                    Si pides 3 o más pizzas recibes 10% de descuento.
                 </div>
+
                 <button type="submit" class="btn btn-ordenar btn-lg">Confirmar pedido</button>
             </form>
 
+            <?php endif; ?>
         </main>
 
         <footer class="bg-dark text-light pt-4 pb-3">
@@ -317,12 +516,12 @@
         <script>
             (function () {
                 var producto = document.getElementById('producto');
-                var tamano   = document.getElementById('tamano');
-                var ayuda    = document.getElementById('ayudaTamano');
+                var tamano = document.getElementById('tamano');
+                var ayuda = document.getElementById('ayudaTamano');
                 var opciones = document.getElementById('opcionesPizza');
                 if (!producto) { return; }
 
-                function actualizar() {
+                    function actualizar() {
                     var opt = producto.options[producto.selectedIndex];
                     var unico = opt && opt.dataset.unico === '1';
                     var pizza = !opt || !opt.value || opt.dataset.pizza === '1';
